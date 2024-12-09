@@ -1,0 +1,5 @@
+data/**
+samples/**
+checkpoints/**
+!checkpoints/**/*.png
+**__pycache__**
