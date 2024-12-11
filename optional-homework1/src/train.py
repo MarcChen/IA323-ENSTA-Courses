@@ -138,11 +138,14 @@ def train(batch_size, lr=0.0002, epochs=10, latent_dim=100, save_path="./checkpo
     device = get_device()
     print(f"Device: {device}")
 
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    save_dir = os.path.join(save_path, timestamp)
+    os.makedirs(save_dir, exist_ok=True)
 
     # Dataset and DataLoader
     transform = get_transform()
     train_dataset = datasets.FashionMNIST(root="./data", train=True, download=False, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
     print("Dataset loaded!")
 
     # Initialize generator and discriminator
@@ -161,6 +164,7 @@ def train(batch_size, lr=0.0002, epochs=10, latent_dim=100, save_path="./checkpo
     print("Starting training...")
     d_loss_list = []
     g_loss_list = []
+    best_g_loss = float("inf")
     for epoch in tqdm(range(epochs), desc="Epochs"):
         for i, (images, labels) in enumerate(train_loader):
             real_images = images.to(device)
@@ -180,40 +184,16 @@ def train(batch_size, lr=0.0002, epochs=10, latent_dim=100, save_path="./checkpo
         d_loss_list.append(d_loss)  # Append discriminator loss per batch
         g_loss_list.append(g_loss)  # Append generator loss per batch
     
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-    # Save the trained models
-    torch.save(generator.state_dict(), os.path.join(save_path, f"generator_{timestamp}.pth"))
-    torch.save(discriminator.state_dict(), os.path.join(save_path, f"discriminator_{timestamp}.pth"))
+        if g_loss < best_g_loss:
+            best_g_loss = g_loss
+            torch.save(generator.state_dict(), os.path.join(save_dir, f"generator_{timestamp}.pth"))
+            torch.save(discriminator.state_dict(), os.path.join(save_dir, f"discriminator_{timestamp}.pth"))
+            print(f"Improved G_Loss: {g_loss:.5f}. Model saved with timestamp {timestamp}.")
 
-    plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, lr, Times_train_discrimnizator, save_path, dropout_prob_discriminator, dropout_prob_generator, timestamp=timestamp)
-    # # Plot and save the loss curves
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(d_loss_list, label="Discriminator Loss")
-    # plt.plot(g_loss_list, label="Generator Loss")
-    # plt.xlabel("Epochs")
-    # plt.ylabel("Loss")
-    # plt.legend()
-    # plt.title("Loss Curves")
-
-    # # Add training information to the right side of the plot
-    # info_text = (
-    #     f"Batch Size: {batch_size}\n"
-    #     f"Latent Dim: {latent_dim}\n"
-    #     f"Epochs: {epochs}\n"
-    #     f"Learning rate: {lr}\n"
-    #     f"Times Train Discriminator: {Times_train_discrimnizator}"
-    # )
-    # plt.text(
-    #     len(d_loss_list) * 0.70,  # Slightly off the plot area
-    #     max(max(d_loss_list), max(g_loss_list)) * 0.8,  # Center vertically
-    #     info_text,
-    #     fontsize=12,
-    #     verticalalignment='center',
-    #     bbox=dict(boxstyle="round", alpha=0.5, facecolor='lightblue')
-    # )
-    # # Save and show the updated plot
-    # timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # plt.savefig(os.path.join(save_path, f"loss_curves_{timestamp}.png"), bbox_inches="tight")
+    
+    # Save the loss curves plot in the new folder
+    plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, lr, Times_train_discrimnizator, save_dir, dropout_prob_discriminator, dropout_prob_generator, timestamp=timestamp)
+    
     
     return
 
@@ -221,7 +201,7 @@ def main():
     parser = argparse.ArgumentParser()
     # parser.add_argument("--save-name",default="", help="Name of the saved model")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training.")
-    parser.add_argument("--epochs", type=int, default=1, help="Number of epochs to train.")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--latent-dim", type=int, default=100, help="Dimension of the latent noise vector.")
     parser.add_argument("--times_train_discrimnizator", type=int, default=5, help="Dimension of the latent noise vector.")
