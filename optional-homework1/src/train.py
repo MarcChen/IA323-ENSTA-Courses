@@ -5,18 +5,11 @@ import argparse
 from tqdm import tqdm
 from data_loading import get_transform
 import os
-from model import Generator, Discriminator
+from model import Generator, Discriminator, GeneratorV3, DiscriminatorV3
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import numpy as np
-from tqdm import tqdm
 from datetime import datetime
-
-## Rename with G(Z) and D(X) and  D(G(Z)) the generator and discriminator functions it's more readable
-
-
-
-
 
 def plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, lr, Times_train_discriminator, save_path, dropout_prob_discriminator, dropout_prob_generator, timestamp=None):
     plt.figure(figsize=(10, 5))
@@ -28,8 +21,6 @@ def plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, l
     plt.title("Loss Curves")
     plt.grid(visible=True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
 
-
-    # Add training information to the right side of the plot (outside the box)
     info_text = (
         f"Batch Size: {batch_size}\n"
         f"Latent Dim: {latent_dim}\n"
@@ -39,11 +30,10 @@ def plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, l
         f"Dropout prob generator: {dropout_prob_generator}\n"
         f"Times Train Discriminator: {Times_train_discriminator}"
     )
-    # Dynamically position the text outside the plot on the right
     plt.gca().set_xlim(left=0, right=len(d_loss_list))
     ax = plt.gca()
-    x_offset = ax.get_xlim()[1] * 1.02  # Place it 10% to the right of the plot area
-    y_offset = ax.get_ylim()[1] * 0.5  # Center vertically
+    x_offset = ax.get_xlim()[1] * 1.02
+    y_offset = ax.get_ylim()[1] * 0.5
 
     plt.text(
         x_offset,
@@ -61,36 +51,25 @@ def plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, l
 def get_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def label_smoothing(labels, smoothing=0.1):
+    """Apply label smoothing to real labels."""
+    return labels * (1.0 - smoothing) + 0.5 * smoothing
 
-# def train_discriminator2(discriminator, generator, criterion, optimizer_D, batch_size, device, real_images, labels):
-#     optimizer_D.zero_grad()
-#     # train with real images
-#     real_validity = discriminator(real_images, labels)
-#     real_loss = criterion(real_validity, torch.ones(batch_size).to(device))
-#     # train with fake images
-#     z = torch.randn(batch_size, 100).to(device)
-#     fake_labels = torch.LongTensor(np.random.randint(0, 10, batch_size)).to(device)
-#     fake_images = generator(z, fake_labels)
-#     fake_validity = discriminator(fake_images, fake_labels)
-#     fake_loss = criterion(fake_validity, torch.zeros(batch_size).to(device))
-    
-#     d_loss = real_loss + fake_loss
-#     d_loss.backward()
-#     optimizer_D.step()
-#     return d_loss.item()
-
-def train_discriminator(discriminator, generator, criterion, optimizer_D, batch_size, device, real_images, labels):
+def train_discriminator(discriminator, generator, criterion, optimizer_D, batch_size, device, real_images, labels, smoothing=0.1):
     optimizer_D.zero_grad()
-    # train with real images
+    # Train with real images
     real_validity = discriminator(real_images, labels)
-    real_loss = criterion(real_validity, torch.ones_like(real_validity).to(device))
-    # train with fake images
+    real_labels = torch.ones_like(real_validity).to(device)
+    real_labels = label_smoothing(real_labels, smoothing)
+    real_loss = criterion(real_validity, real_labels)
+
+    # Train with fake images
     z = torch.randn(batch_size, 100).to(device)
     fake_labels = torch.LongTensor(np.random.randint(0, 10, batch_size)).to(device)
     fake_images = generator(z, fake_labels)
     fake_validity = discriminator(fake_images, fake_labels)
     fake_loss = criterion(fake_validity, torch.zeros_like(fake_validity).to(device))
-    
+
     d_loss = real_loss + fake_loss
     d_loss.backward()
     optimizer_D.step()
@@ -98,113 +77,112 @@ def train_discriminator(discriminator, generator, criterion, optimizer_D, batch_
 
 def train_generator(optimizer_G, generator, discriminator, criterion, batch_size, device):
     optimizer_G.zero_grad()
-    z =torch.randn(batch_size, 100).to(device)
+    z = torch.randn(batch_size, 100).to(device)
     fake_labels = torch.LongTensor(np.random.randint(0, 10, batch_size)).to(device)
     fake_images = generator(z, fake_labels)
     validity = discriminator(fake_images, fake_labels)
-    g_loss = criterion(validity, torch.ones(batch_size).to(device))
+    g_loss = criterion(validity, torch.ones_like(validity).to(device))
     g_loss.backward()
     optimizer_G.step()
     return g_loss.item()
 
-def compute_mean_std(dataset):
-    """
-    Compute the mean and standard deviation of a dataset.
+
+def train_generator2(optimizer_G, generator, discriminator, criterion, BATCH_SIZE, device):
+    optimizer_G.zero_grad()
+    z =torch.randn(BATCH_SIZE, 100).to(device)
+    fake_labels = torch.LongTensor(np.random.randint(0, 10, BATCH_SIZE)).to(device)
+    fake_images = generator(z, fake_labels)
+    validity = discriminator(fake_images, fake_labels)
+    g_loss = criterion(validity, torch.ones(BATCH_SIZE).to(device))
+    g_loss.backward()
+    optimizer_G.step()
+    return g_loss.item()
+
+def train_discriminator2(real_images, labels, generator, discriminator, criterion, optimizer_D, BATCH_SIZE, device):
+    optimizer_D.zero_grad()
+    # train with real images
+    real_validity = discriminator(real_images, labels)
+    real_loss = criterion(real_validity, torch.ones(BATCH_SIZE).to(device))
+    # train with fake images
+    z = torch.randn(BATCH_SIZE, 100).to(device)
+    fake_labels = torch.LongTensor(np.random.randint(0, 10, BATCH_SIZE)).to(device)
+    fake_images = generator(z, fake_labels)
+    fake_validity = discriminator(fake_images, fake_labels)
+    fake_loss = criterion(fake_validity, torch.zeros(BATCH_SIZE).to(device))
     
-    Parameters:
-    - dataset (torch.utils.data.Dataset): The dataset for which to compute the mean and std.
+    d_loss = real_loss + fake_loss
+    d_loss.backward()
+    optimizer_D.step()
+    return d_loss.item()
 
-    Returns:
-    - mean (float): Mean value of the dataset.
-    - std (float): Standard deviation of the dataset.
-    """
-    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=4)
-    mean = 0.0
-    std = 0.0
-    total_samples = 0
-
-    for data, _ in loader:
-        batch_samples = data.size(0)
-        mean += data.mean(dim=(0, 2, 3)) * batch_samples
-        std += data.std(dim=(0, 2, 3)) * batch_samples
-        total_samples += batch_samples
-
-    mean /= total_samples
-    std /= total_samples
-    return mean.item(), std.item()
-
-def train(batch_size, lr=0.0002, epochs=10, latent_dim=100, save_path="./checkpoints", dropout_prob_discriminator=0.0, dropout_prob_generator=0.3,Times_train_discrimnizator=5):
-    """Train the conditional GAN."""
+def train(batch_size, lr=0.0002, epochs=10, latent_dim=100, save_path="./checkpoints", dropout_prob_discriminator=0.0, dropout_prob_generator=0.3, Times_train_discriminator=5):
     device = get_device()
     print(f"Device: {device}")
+
+    torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     save_dir = os.path.join(save_path, timestamp)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Dataset and DataLoader
     transform = get_transform()
-    train_dataset = datasets.FashionMNIST(root="./data", train=True, download=False, transform=transform)
+    train_dataset = datasets.FashionMNIST(root="./data", train=True, download=True, transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    print("Dataset loaded!")
 
-    # Initialize generator and discriminator
-    # generator = Generator(dropout_prob = dropout_prob_generator).to(device)
-    generator = Generator().to(device)
-    discriminator = Discriminator(dropout_prob = dropout_prob_discriminator).to(device)
+    # generator = Generator().to(device)
+    # discriminator = Discriminator(dropout_prob=dropout_prob_discriminator).to(device)
 
-    # Optimizers
+    generator = GeneratorV3().to(device)
+    discriminator = DiscriminatorV3().to(device)
+
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr)
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr)
 
-    # Loss function
+    # scheduler_G = torch.optim.lr_scheduler.StepLR(optimizer_G, step_size=10, gamma=0.5)
+    # scheduler_D = torch.optim.lr_scheduler.StepLR(optimizer_D, step_size=10, gamma=0.5)
+
     criterion = nn.BCELoss()
 
-    # Training loop
-    print("Starting training...")
     d_loss_list = []
     g_loss_list = []
     best_g_loss = float("inf")
+
     for epoch in tqdm(range(epochs), desc="Epochs"):
         for i, (images, labels) in enumerate(train_loader):
             real_images = images.to(device)
             labels = labels.to(device)
-            generator.train()
 
-            # Train the discriminator multiple times
             d_loss = 0
-            for _ in range(Times_train_discrimnizator):
-                d_loss += train_discriminator(discriminator, generator, criterion, optimizer_D, batch_size, device, real_images, labels)
-            d_loss /= Times_train_discrimnizator  # Average discriminator loss
-            # Train the generator
-            g_loss = train_generator(optimizer_G, generator, discriminator, criterion, batch_size, device)
-            
+            for _ in range(Times_train_discriminator):
+                # d_loss += train_discriminator(discriminator, generator, criterion, optimizer_D, batch_size, device, real_images, labels)
+                d_loss = train_discriminator2(real_images, labels, generator, discriminator, criterion, optimizer_D, batch_size, device)
+
+            # g_loss = train_generator(optimizer_G, generator, discriminator, criterion, batch_size, device)
+            g_loss = train_generator2(optimizer_G, generator, discriminator, criterion, batch_size, device)
+
+        # scheduler_G.step()
+        # scheduler_D.step()
 
         print(f"EPOCH: {epoch} | D_Loss: {d_loss:.5f} | G_Loss: {g_loss:.5f}")
-        d_loss_list.append(d_loss)  # Append discriminator loss per batch
-        g_loss_list.append(g_loss)  # Append generator loss per batch
-    
+        d_loss_list.append(d_loss)
+        g_loss_list.append(g_loss)
+
         if g_loss < best_g_loss:
             best_g_loss = g_loss
             torch.save(generator.state_dict(), os.path.join(save_dir, f"generator_{timestamp}.pth"))
             torch.save(discriminator.state_dict(), os.path.join(save_dir, f"discriminator_{timestamp}.pth"))
             print(f"Improved G_Loss: {g_loss:.5f}. Model saved with timestamp {timestamp}.")
 
-    
-    # Save the loss curves plot in the new folder
-    plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, lr, Times_train_discrimnizator, save_dir, dropout_prob_discriminator, dropout_prob_generator, timestamp=timestamp)
-    
-    
-    return
+    plot_loss_curves(d_loss_list, g_loss_list, batch_size, latent_dim, epochs, lr, Times_train_discriminator, save_dir, dropout_prob_discriminator, dropout_prob_generator, timestamp=timestamp)
 
 def main():
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--save-name",default="", help="Name of the saved model")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--latent-dim", type=int, default=100, help="Dimension of the latent noise vector.")
-    parser.add_argument("--times_train_discrimnizator", type=int, default=5, help="Dimension of the latent noise vector.")
+    parser.add_argument("--times_train_discriminator", type=int, default=5, help="Times to train discriminator.")
     parser.add_argument("--dropout_prob_discriminator", type=float, default=0.3, help="Dropout probability for the discriminator.")
     parser.add_argument("--dropout_prob_generator", type=float, default=0.0, help="Dropout probability for the generator.")
     args = parser.parse_args()
@@ -213,7 +191,7 @@ def main():
           lr=args.lr,
           epochs=args.epochs,
           latent_dim=args.latent_dim,
-          Times_train_discrimnizator=args.times_train_discrimnizator,
+          Times_train_discriminator=args.times_train_discriminator,
           dropout_prob_discriminator=args.dropout_prob_discriminator,
           dropout_prob_generator=args.dropout_prob_generator
           )

@@ -1,10 +1,11 @@
 import argparse
+import dis
 import os
 import torch
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from model import Generator
+from model import Generator, Discriminator
 import re
 
 def load_models(model, model_path="./checkpoints/generator.pth"):
@@ -18,6 +19,59 @@ def load_models(model, model_path="./checkpoints/generator.pth"):
         print("Checkpoint keys:", checkpoint.keys())
         print("Model state_dict keys:", model.state_dict().keys())
     return model
+
+def outlier_detection(discriminator, test_loader, img_dim, save_dir):
+    """Identify outliers using the discriminator."""
+    discriminator.eval()
+    outliers = []
+    scores = []
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    for idx, (real_img, label) in enumerate(test_loader):
+        if idx >= 10:  # Limit to 10 samples for visualization
+            break
+        with torch.inference_mode():
+            real_img = real_img.to(torch.device('cpu'))
+            score = discriminator(real_img.unsqueeze(0)).item()
+            scores.append(score)
+            if score < 0.5:  # Arbitrary threshold for outlier detection
+                outliers.append((real_img.squeeze().numpy(), label))
+
+    # Visualization: Outliers
+    if outliers:
+        f, axes = plt.subplots(1, len(outliers), figsize=(16, 8))
+        f.suptitle("Detected Outliers", fontsize=16)
+        for i, (outlier_img, label) in enumerate(outliers):
+            axes[i].imshow(outlier_img, cmap='gray')
+            axes[i].set_title(f"Label: {label}")
+            axes[i].axis('off')
+        plt.savefig(f"{save_dir}/outliers.png", bbox_inches="tight")
+        print(f"Outliers saved to '{save_dir}/outliers.png'.")
+    else:
+        print("No outliers detected.")
+
+def latent_space_analysis(generator, test_loader, img_dim, save_dir):
+    """Analyze latent space representations of test data."""
+    generator.eval()
+    latent_vectors = []
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    for idx, (real_img, label) in enumerate(test_loader):
+        if idx >= 10:  # Limit to 10 samples for visualization
+            break
+        noise = torch.randn(1, img_dim)
+        latent_vectors.append(noise.squeeze().numpy())
+
+    # Visualization: Latent Space
+    f = plt.figure(figsize=(8, 8))
+    f.suptitle("Latent Space Representations", fontsize=16)
+    plt.scatter([v[0] for v in latent_vectors], [v[1] for v in latent_vectors])
+    plt.xlabel("Latent Dimension 1")
+    plt.ylabel("Latent Dimension 2")
+    plt.savefig(f"{save_dir}/latent_space.png", bbox_inches="tight")
+    print(f"Latent space analysis saved to '{save_dir}/latent_space.png'.")
 
 def extract_timestamp(model_path):
     """Extract timestamp from the model path."""
@@ -136,6 +190,8 @@ def main():
     save_dir = f"./samples/{args.ts}"
     generator = Generator(latent_dim=args.latent_dim, dropout_prob=args.dropout_prob_generator)
     generator = load_models(generator, model_path=model_path)
+    discriminator = Discriminator(latent_dim=args.latent_dim)
+    discriminator = load_models(discriminator, model_path=f"./checkpoints/{args.ts}/discriminator_{args.ts}.pth")
 
     # Generate samples for visualization
     generate_sample(model_path=model_path, img_dim=args.latent_dim, 
@@ -146,6 +202,12 @@ def main():
 
     # Analyze diversity of generated images
     analyze_diversity(generator, img_dim=args.latent_dim, save_dir=save_dir)
+    
+    # Detect outliers using the discriminator
+    outlier_detection(discriminator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
+
+    # Perform latent space analysis
+    latent_space_analysis(generator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
 
 if __name__ == "__main__":
     main()
