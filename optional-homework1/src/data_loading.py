@@ -68,7 +68,6 @@ def get_transform(train=False):
         mean, std = load_mean_std(os.path.join(os.path.dirname(__file__), '..', 'data', 'mean_std.json'))
     except FileNotFoundError:
         mean, std = 0.5, 0.5
-
     if train:
         transform = transforms.Compose([
             transforms.RandomHorizontalFlip(p=0.5),

@@ -1,25 +1,42 @@
 import argparse
 import dis
 import os
+from sympy import im
 import torch
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from model import Generator, Discriminator, GeneratorV3, DiscriminatorV3
+from model import Generator as G , Discriminator as D
 from data_loading import get_transform
 import re
+import numpy as np
 
-def load_models(model, model_path="./checkpoints/generator.pth"):
+def load_models(model, model_path="./checkpoints/generator.pth", was_data_parallel=False):
     """Load the model weights."""
     try:
-        checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-        model.load_state_dict(checkpoint, strict=False)  # Allow partial loading
+        checkpoint = torch.load(model_path)
+        
+        # Print the keys for debugging
+        # print("Original checkpoint keys:", checkpoint.keys())
+        
+        if was_data_parallel:
+            # Adjust keys by removing "module."
+            state_dict = {k.replace("module.", ""): v for k, v in checkpoint.items()}
+            # print("Modified state_dict keys:", state_dict.keys())
+            model.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(checkpoint)
+        
         print("Model loaded successfully.")
     except RuntimeError as e:
         print(f"Error loading model: {e}")
-        print("Checkpoint keys:", checkpoint.keys())
+        if 'checkpoint' in locals():
+            print("Checkpoint keys:", checkpoint.keys())
         print("Model state_dict keys:", model.state_dict().keys())
+    
     return model
+
+
 
 def outlier_detection(discriminator, test_loader, img_dim, save_dir):
     """Identify outliers using the discriminator."""
@@ -52,27 +69,45 @@ def outlier_detection(discriminator, test_loader, img_dim, save_dir):
     else:
         print("No outliers detected.")
 
-def latent_space_analysis(generator, test_loader, img_dim, save_dir):
-    """Analyze latent space representations of test data."""
+from sklearn.decomposition import PCA
+import numpy as np
+
+def latent_space_analysis(generator, train_loader, img_dim, save_dir):
+    """Analyze latent space representations of training data with label colors using PCA."""
     generator.eval()
     latent_vectors = []
+    labels = []
 
     os.makedirs(save_dir, exist_ok=True)
 
-    for idx, (real_img, label) in enumerate(test_loader):
-        if idx >= 10:  # Limit to 10 samples for visualization
+    # Generate latent space vectors
+    for idx, (real_img, label) in enumerate(train_loader):
+        if idx >= 1000:  # Limit to 1000 samples for visualization
             break
-        noise = torch.randn(1, img_dim)
-        latent_vectors.append(noise.squeeze().numpy())
+        noise = torch.randn(1, img_dim).squeeze().numpy()
+        latent_vectors.append(noise)
+        labels.append(label.item())
+
+    latent_vectors = np.array(latent_vectors)
+    labels = np.array(labels)
+
+    # Apply PCA to reduce dimensionality to 2
+    pca = PCA(n_components=2)
+    reduced_latent_vectors = pca.fit_transform(latent_vectors)
 
     # Visualization: Latent Space
-    f = plt.figure(figsize=(8, 8))
-    f.suptitle("Latent Space Representations", fontsize=16)
-    plt.scatter([v[0] for v in latent_vectors], [v[1] for v in latent_vectors])
-    plt.xlabel("Latent Dimension 1")
-    plt.ylabel("Latent Dimension 2")
-    plt.savefig(f"{save_dir}/latent_space.png", bbox_inches="tight")
-    print(f"Latent space analysis saved to '{save_dir}/latent_space.png'.")
+    plt.figure(figsize=(10, 10))
+    plt.title("Latent Space Representations with Labels (PCA)", fontsize=16)
+    scatter = plt.scatter(reduced_latent_vectors[:, 0], reduced_latent_vectors[:, 1],
+                          c=labels, cmap='tab10', s=20, alpha=0.8)
+    plt.colorbar(scatter, label="Labels")
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.savefig(f"{save_dir}/latent_space_with_labels_pca.png", bbox_inches="tight")
+    plt.show()
+    print(f"Latent space analysis with labels saved to '{save_dir}/latent_space_with_labels_pca.png'.")
+
+
 
 def extract_timestamp(model_path):
     """Extract timestamp from the model path."""
@@ -136,21 +171,24 @@ def analyze_diversity(generator, img_dim, save_dir):
     plt.savefig(f"{save_dir}/diversity_images.png", bbox_inches="tight")
     print(f"Diversity images saved to '{save_dir}/diversity_images.png'.")
 
-def prepare_test_data_loader(batch_size=1):
+def prepare_test_data_loader(batch_size=1, training = False):
     """Prepare the test dataset loader."""
-    # transform = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Normalize((0.5,), (0.5,))
-    # ])
-    transform = get_transform()
-    test_dataset = datasets.FashionMNIST(root="./data", train=False, download=True, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    return test_loader
+    # transform = get_transform()
+    if not training:
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=(0.5,), std=(0.5,))])
+        test_dataset = datasets.FashionMNIST(root="./data", train=False, download=True, transform=transform)
+        loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        return loader
+    else:
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=(0.5,), std=(0.5,))])
+        test_dataset = datasets.FashionMNIST(root="./data", train=True, download=True, transform=transform)
+        loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        return loader
 
-def generate_sample(model_path, img_dim=100, dropout_prob_generator=0.3, save_dir="./samples"):
+def generate_sample(model_path, img_dim=100, save_dir="./samples", was_data_parallel=False):
     """Generate samples for visualization."""
-    generator_loaded = Generator(latent_dim=img_dim, dropout_prob=dropout_prob_generator)
-    generator_loaded = load_models(generator_loaded, model_path=model_path)
+    generator_loaded = G(latent_dim=img_dim)
+    generator_loaded = load_models(generator_loaded, model_path=model_path, was_data_parallel=was_data_parallel)
 
     noise_test = torch.randn(1, img_dim)  # Adjusted for correct shape
     label_list = [torch.LongTensor([x]) for x in range(10)]
@@ -181,23 +219,24 @@ def generate_sample(model_path, img_dim=100, dropout_prob_generator=0.3, save_di
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--latent-dim", type=int, default=100, help="Dimension of the latent noise vector.")
-    parser.add_argument("--ts", type=str, default="2024-12-11_16:59:05", help="Timestamp identifier for the model.")
-    parser.add_argument("--dropout_prob_generator", type=float, default=0.0, help="Dropout probability for the generator.")
+    parser.add_argument("--ts", type=str,required=True ,default="2024-12-11_16:59:05", help="Timestamp identifier for the model.")
+    parser.add_argument("--data_parallel", type=bool, default=False, help="Whether the model was trained using nn.DataParallel.")
     args = parser.parse_args()
 
     print(f"Using latent dimension: {args.latent_dim}")
     test_loader = prepare_test_data_loader()
+    train_loader = prepare_test_data_loader(training=True)
 
     model_path = f"./checkpoints/{args.ts}/generator_{args.ts}.pth"
     save_dir = f"./samples/{args.ts}"
-    generator = Generator(latent_dim=args.latent_dim, dropout_prob=args.dropout_prob_generator)
-    generator = load_models(generator, model_path=model_path)
-    discriminator = Discriminator()
-    discriminator = load_models(discriminator, model_path=f"./checkpoints/{args.ts}/discriminator_{args.ts}.pth")
+    generator = G(latent_dim=args.latent_dim)
+    generator = load_models(generator, model_path=model_path, was_data_parallel=args.data_parallel)
+    discriminator = D()
+    discriminator = load_models(discriminator, model_path=f"./checkpoints/{args.ts}/discriminator_{args.ts}.pth", was_data_parallel=args.data_parallel)
 
     # Generate samples for visualization
     generate_sample(model_path=model_path, img_dim=args.latent_dim, 
-                    dropout_prob_generator=args.dropout_prob_generator, save_dir=save_dir)
+                    save_dir=save_dir, was_data_parallel=args.data_parallel)
 
     # Reconstruct test data and compare with real images
     reconstruct_test_data(generator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
@@ -205,11 +244,9 @@ def main():
     # Analyze diversity of generated images
     analyze_diversity(generator, img_dim=args.latent_dim, save_dir=save_dir)
     
-    # Detect outliers using the discriminator
-    # outlier_detection(discriminator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
+    # Perform latent space analysis with the training set
+    latent_space_analysis(generator, train_loader, img_dim=args.latent_dim, save_dir=save_dir)
 
-    # Perform latent space analysis
-    latent_space_analysis(generator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
 
 if __name__ == "__main__":
     main()
