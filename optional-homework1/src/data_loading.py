@@ -54,13 +54,12 @@ def compute_and_save_mean_std(dataset, file_path):
     return mean.item(), std.item()
 
 
-def get_transform():
+def get_transform(train=False):
     """
-    Create a transformation pipeline with normalization.
+    Create a transformation pipeline with optional data augmentation and normalization.
 
     Parameters:
-    - mean (float): Mean for normalization.
-    - std (float): Standard deviation for normalization.
+    - train (bool): If True, include data augmentation suitable for training.
 
     Returns:
     - transform (torchvision.transforms.Compose): Composed transformation pipeline.
@@ -70,12 +69,20 @@ def get_transform():
     except FileNotFoundError:
         mean, std = 0.5, 0.5
 
-
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((mean,), (std,))
-    ])
+    if train:
+        transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(degrees=10),
+            transforms.ToTensor(),
+            transforms.Normalize((mean,), (std,))
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((mean,), (std,))
+        ])
     return transform
+
 
 
 def load_dataset(path=None):

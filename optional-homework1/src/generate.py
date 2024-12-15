@@ -5,7 +5,8 @@ import torch
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from model import Generator, Discriminator
+from model import Generator, Discriminator, GeneratorV3, DiscriminatorV3
+from data_loading import get_transform
 import re
 
 def load_models(model, model_path="./checkpoints/generator.pth"):
@@ -137,10 +138,11 @@ def analyze_diversity(generator, img_dim, save_dir):
 
 def prepare_test_data_loader(batch_size=1):
     """Prepare the test dataset loader."""
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
+    # transform = transforms.Compose([
+    #     transforms.ToTensor(),
+    #     transforms.Normalize((0.5,), (0.5,))
+    # ])
+    transform = get_transform()
     test_dataset = datasets.FashionMNIST(root="./data", train=False, download=True, transform=transform)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return test_loader
@@ -190,7 +192,7 @@ def main():
     save_dir = f"./samples/{args.ts}"
     generator = Generator(latent_dim=args.latent_dim, dropout_prob=args.dropout_prob_generator)
     generator = load_models(generator, model_path=model_path)
-    discriminator = Discriminator(latent_dim=args.latent_dim)
+    discriminator = Discriminator()
     discriminator = load_models(discriminator, model_path=f"./checkpoints/{args.ts}/discriminator_{args.ts}.pth")
 
     # Generate samples for visualization
@@ -204,7 +206,7 @@ def main():
     analyze_diversity(generator, img_dim=args.latent_dim, save_dir=save_dir)
     
     # Detect outliers using the discriminator
-    outlier_detection(discriminator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
+    # outlier_detection(discriminator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
 
     # Perform latent space analysis
     latent_space_analysis(generator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)

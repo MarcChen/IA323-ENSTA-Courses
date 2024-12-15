@@ -1,34 +1,81 @@
 import torch
 import torch.nn as nn
 
+# class Generator(nn.Module):
+#     def __init__(self, image_size=28 * 28, class_label_size=10, latent_dim=100, dropout_prob=0.0):
+#         super().__init__()
+
+#         self.latent_dim = latent_dim
+
+#         self.label_emb = nn.Embedding(class_label_size, class_label_size)
+
+#         # Define the layer function for modularity
+#         def layer(input_dim, output_dim, dropout_prob=0.0):
+#             layers = [nn.Linear(input_dim, output_dim), nn.LeakyReLU(0.2, inplace=True)]
+#             if dropout_prob > 0:
+#                 layers.append(nn.Dropout(dropout_prob))
+#             return layers
+
+#         # Build the model using the layer function
+#         self.model = nn.Sequential(
+#             *layer(latent_dim + class_label_size, 256, dropout_prob),
+#             *layer(256, 512, dropout_prob),
+#             nn.BatchNorm1d(512, 0.8),
+#             *layer(512, 1024, dropout_prob),
+#             nn.BatchNorm1d(1024, 0.8),
+#             nn.Linear(1024, image_size),
+#             nn.Tanh()
+#         )
+
+#     def forward(self, z, labels):
+#         z = z.view(z.size(0), self.latent_dim)  # Assuming latent space dimension is 100
+#         c = self.label_emb(labels)
+#         x = torch.cat([z, c], 1)
+#         out = self.model(x)
+#         return out.view(x.size(0), 28, 28)  # Assuming output image size is 28x28
+
+import torch
+import torch.nn as nn
+
 class Generator(nn.Module):
-    def __init__(self, image_size=28 * 28, class_label_size=10, latent_dim=100, dropout_prob=0.0):
+    def __init__(self, image_size=28 * 28, class_label_size=10, latent_dim=100, dropout_prob=0.0, noise_std=0.1):
         super().__init__()
-
+        
+        self.latent_dim = latent_dim
+        self.noise_std = noise_std
         self.label_emb = nn.Embedding(class_label_size, class_label_size)
+        self.training = True
 
-        # Define the layer function for modularity
-        def layer(input_dim, output_dim, dropout_prob=0.0):
-            layers = [nn.Linear(input_dim, output_dim), nn.LeakyReLU(0.2, inplace=True)]
-            if dropout_prob > 0:
-                layers.append(nn.Dropout(dropout_prob))
+        def layer(input_dim, output_dim, normalize=True):
+            layers = [nn.Linear(input_dim, output_dim)]
+            if normalize:
+                layers.append(nn.BatchNorm1d(output_dim, 0.9))
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
 
-        # Build the model using the layer function
         self.model = nn.Sequential(
-            *layer(latent_dim + class_label_size, 256, dropout_prob),
-            *layer(256, 512, dropout_prob),
-            *layer(512, 1024, dropout_prob),
+            *layer(latent_dim + class_label_size, 256),
+            *layer(256, 512),
+            *layer(512, 1024),
             nn.Linear(1024, image_size),
             nn.Tanh()
         )
 
+    # def inject_noise(self, x):
+    #     """Inject Gaussian noise."""
+    #     if self.training:  # Only apply noise during training
+    #         noise = torch.randn_like(x) * self.noise_std
+    #         x = x + noise
+    #     return x
+
     def forward(self, z, labels):
-        z = z.view(z.size(0), 100)  # Assuming latent space dimension is 100
+        z = z.view(z.size(0), self.latent_dim)  # Assuming latent space dimension is 100
         c = self.label_emb(labels)
         x = torch.cat([z, c], 1)
         out = self.model(x)
         return out.view(x.size(0), 28, 28)  # Assuming output image size is 28x28
+
+
 
 class Discriminator(nn.Module):
     def __init__(self, image_size=28 * 28, class_label_size=10, dropout_prob=0.3):
@@ -159,6 +206,57 @@ class DiscriminatorV3(nn.Module):
             nn.Sigmoid()
         )
     
+    def forward(self, x, labels):
+        x = x.view(x.size(0), 784)
+        c = self.label_emb(labels)
+        x = torch.cat([x, c], 1)
+        out = self.model(x)
+        return out.squeeze()
+    
+class GeneratorV4(nn.Module):
+    def __init__(self, img_dim=100, class_label_size=10, Image_size=784):
+        super().__init__()
+
+        self.label_emb = nn.Embedding(class_label_size, class_label_size)
+
+        self.model = nn.Sequential(
+            nn.Linear(img_dim + class_label_size, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(256, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(1024, Image_size),
+            nn.Tanh()
+        )
+
+    def forward(self, z, labels):
+        z = z.view(z.size(0), 100)
+        c = self.label_emb(labels)
+        x = torch.cat([z, c], 1)
+        out = self.model(x)
+        return out.view(x.size(0), 28, 28)
+
+class DiscriminatorV4(nn.Module):
+    def __init__(self, class_label_size=10, Image_size=784):
+        super().__init__()
+
+        self.label_emb = nn.Embedding(class_label_size, class_label_size)
+
+        self.model = nn.Sequential(
+            nn.Linear(Image_size + class_label_size, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+
     def forward(self, x, labels):
         x = x.view(x.size(0), 784)
         c = self.label_emb(labels)
