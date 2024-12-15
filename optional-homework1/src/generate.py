@@ -6,7 +6,7 @@ import torch
 import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from model import Generator as G , Discriminator as D
+from model import Generator as G , Discriminator as D, Generator_For_LatentSpaceAnalysis as G_LSA
 from data_loading import get_transform
 import re
 import numpy as np
@@ -70,42 +70,89 @@ def outlier_detection(discriminator, test_loader, img_dim, save_dir):
         print("No outliers detected.")
 
 from sklearn.decomposition import PCA
-import numpy as np
+
 
 def latent_space_analysis(generator, train_loader, img_dim, save_dir):
-    """Analyze latent space representations of training data with label colors using PCA."""
+    """Analyze learned latent space representations, center them, and save plots per class with consistent colors."""
     generator.eval()
-    latent_vectors = []
-    labels = []
-
     os.makedirs(save_dir, exist_ok=True)
 
-    # Generate latent space vectors
+    # Class names for FashionMNIST
+    class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+                   'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+
+    latent_vectors = []
+    labels_list = []
+
+    # Extract latent representations from the Generator
     for idx, (real_img, label) in enumerate(train_loader):
         if idx >= 1000:  # Limit to 1000 samples for visualization
             break
-        noise = torch.randn(1, img_dim).squeeze().numpy()
-        latent_vectors.append(noise)
-        labels.append(label.item())
+        noise = torch.randn(1, img_dim)  # Random noise
+        with torch.no_grad():
+            latent_rep = generator(noise, label, return_latent=True)  # Extract latent representations
+            latent_vectors.append(latent_rep.squeeze().cpu().numpy())
+            labels_list.append(label.item())
 
+    # Convert to numpy arrays
     latent_vectors = np.array(latent_vectors)
-    labels = np.array(labels)
+    labels_list = np.array(labels_list)
 
-    # Apply PCA to reduce dimensionality to 2
+    # Apply PCA to reduce dimensionality
     pca = PCA(n_components=2)
     reduced_latent_vectors = pca.fit_transform(latent_vectors)
 
-    # Visualization: Latent Space
+    # Center the data
+    reduced_latent_vectors -= reduced_latent_vectors.mean(axis=0)
+
+    # Define a consistent colormap
+    colormap = plt.cm.get_cmap("tab10")
+
+    # General Visualization: All Classes Together
     plt.figure(figsize=(10, 10))
-    plt.title("Latent Space Representations with Labels (PCA)", fontsize=16)
+    plt.title("Learned Latent Space Representations (Centered) with Class Names", fontsize=16)
     scatter = plt.scatter(reduced_latent_vectors[:, 0], reduced_latent_vectors[:, 1],
-                          c=labels, cmap='tab10', s=20, alpha=0.8)
-    plt.colorbar(scatter, label="Labels")
-    plt.xlabel("Principal Component 1")
-    plt.ylabel("Principal Component 2")
-    plt.savefig(f"{save_dir}/latent_space_with_labels_pca.png", bbox_inches="tight")
-    plt.show()
-    print(f"Latent space analysis with labels saved to '{save_dir}/latent_space_with_labels_pca.png'.")
+                          c=labels_list, cmap=colormap, s=20, alpha=0.8)
+    cbar = plt.colorbar(scatter)
+    cbar.set_ticks(range(10))
+    cbar.set_ticklabels(class_names)
+    cbar.set_label("Class Names")
+    plt.xlabel("Principal Component 1 (Centered)")
+    plt.ylabel("Principal Component 2 (Centered)")
+    plt.grid(True)
+    plt.savefig(f"{save_dir}/latent_space_with_class_names_centered.png", bbox_inches="tight")
+    plt.close()
+    print(f"General latent space analysis saved to '{save_dir}/latent_space_with_class_names_centered.png'.")
+
+    # Save Individual Class Plots with Consistent Colors
+    class_folder = os.path.join(save_dir, "individual_classes")
+    os.makedirs(class_folder, exist_ok=True)
+
+    for label_idx, class_name in enumerate(class_names):
+        # Filter points for the current label
+        mask = (labels_list == label_idx)
+        class_vectors = reduced_latent_vectors[mask]
+
+        # Sanitize the class name for safe filenames
+        safe_class_name = re.sub(r'[^\w\-_.]', '_', class_name)
+
+        # Plot for the current class with consistent colors
+        plt.figure(figsize=(8, 8))
+        plt.title(f"Latent Space for Class: {class_name} (Centered)", fontsize=14)
+        plt.scatter(class_vectors[:, 0], class_vectors[:, 1], color=colormap(label_idx), s=20, alpha=0.8)
+        plt.xlabel("Principal Component 1 (Centered)")
+        plt.ylabel("Principal Component 2 (Centered)")
+        plt.grid(True)
+        plt.xlim(-5, 5)
+        plt.ylim(-5, 5)
+
+        # Save the plot
+        plt.savefig(os.path.join(class_folder, f"latent_space_{safe_class_name}.png"), bbox_inches="tight")
+        plt.close()
+        print(f"Saved latent space plot for class '{class_name}' to '{class_folder}/latent_space_{safe_class_name}.png'.")
+
+
+
 
 
 
@@ -220,7 +267,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--latent-dim", type=int, default=100, help="Dimension of the latent noise vector.")
     parser.add_argument("--ts", type=str,required=True ,default="2024-12-11_16:59:05", help="Timestamp identifier for the model.")
-    parser.add_argument("--data_parallel", type=bool, default=False, help="Whether the model was trained using nn.DataParallel.")
+    parser.add_argument("--data_parallel", type=bool, default=True, help="Whether the model was trained using nn.DataParallel.")
     args = parser.parse_args()
 
     print(f"Using latent dimension: {args.latent_dim}")
@@ -244,8 +291,11 @@ def main():
     # Analyze diversity of generated images
     analyze_diversity(generator, img_dim=args.latent_dim, save_dir=save_dir)
     
+    Latent_Analysis_G = G_LSA(latent_dim=args.latent_dim)
+    Latent_Analysis_G = load_models(Latent_Analysis_G, model_path=model_path, was_data_parallel=args.data_parallel)
+
     # Perform latent space analysis with the training set
-    latent_space_analysis(generator, train_loader, img_dim=args.latent_dim, save_dir=save_dir)
+    latent_space_analysis(Latent_Analysis_G, train_loader, img_dim=args.latent_dim, save_dir=save_dir)
 
 
 if __name__ == "__main__":
