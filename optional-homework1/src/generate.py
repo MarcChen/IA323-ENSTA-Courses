@@ -473,7 +473,7 @@ def main():
     train_loader = prepare_test_data_loader(training=True)
 
     model_path = f"./checkpoints/{args.ts}/generator_{args.ts}.pth"
-    save_dir = f"./samples/best_training_samples"
+    save_dir = f"./samples/{args.ts}"
     generator = G(latent_dim=args.latent_dim)
     generator = load_models(generator, model_path=model_path, was_data_parallel=args.data_parallel)
     discriminator = D()
