@@ -65,16 +65,8 @@ class Generator_For_LatentSpaceAnalysis(nn.Module):
         self.fc1 = nn.Linear(self.latent_dim + class_label_size, 256)  # First layer
         self.leaky_relu1 = nn.LeakyReLU(0.2, inplace=True)
         
-        self.model = nn.Sequential(
-            nn.Linear(256, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 1024),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(1024, Image_size),
-            nn.Tanh()
-        )
 
-    def forward(self, z, labels, return_latent=False):
+    def forward(self, z, labels):
         z = z.view(z.size(0), self.latent_dim)  # Reshape noise
         c = self.label_emb(labels)  # Label embedding
         x = torch.cat([z, c], 1)  # Concatenate noise and labels
@@ -83,9 +75,7 @@ class Generator_For_LatentSpaceAnalysis(nn.Module):
         latent_rep = self.fc1(x)
         latent_rep = self.leaky_relu1(latent_rep)
 
-        if return_latent:
-            return latent_rep  # Return latent representation
         
-        # Pass through the rest of the model
-        out = self.model(latent_rep)
-        return out.view(x.size(0), 28, 28)
+        return latent_rep  # Return latent representation
+        
+    

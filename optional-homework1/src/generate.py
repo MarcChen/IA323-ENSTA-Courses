@@ -10,6 +10,205 @@ from model import Generator as G , Discriminator as D, Generator_For_LatentSpace
 from data_loading import get_transform
 import re
 import numpy as np
+from sklearn.decomposition import PCA
+
+
+def test_discriminator(discriminator, generator, test_loader, save_dir, img_dim=100, device='cpu'):
+    """
+    Evaluate the Discriminator's performance on real and fake samples, and save a figure with three pie charts.
+    
+    Args:
+        discriminator (nn.Module): The trained Discriminator model.
+        generator (nn.Module): The trained Generator model.
+        test_loader (DataLoader): DataLoader for real images.
+        img_dim (int): Dimensionality of the latent vector.
+        save_dir (str): Directory to save the accuracy pie charts.
+        device (str): 'cpu' or 'cuda'.
+    """
+    discriminator.eval()
+    generator.eval()
+    total_real = 0
+    total_fake = 0
+    correct_real = 0
+    correct_fake = 0
+
+    with torch.no_grad():
+        # Evaluate on real samples
+        for real_imgs, labels in test_loader:
+            real_imgs, labels = real_imgs.to(device), labels.to(device)
+            outputs_real = discriminator(real_imgs, labels)
+            predictions_real = (outputs_real > 0.5).float()
+            correct_real += predictions_real.sum().item()
+            total_real += real_imgs.size(0)
+
+        # Generate and evaluate fake samples
+        for _ in range(len(test_loader)):
+            z = torch.randn(real_imgs.size(0), img_dim).to(device)
+            fake_labels = torch.randint(0, 10, (real_imgs.size(0),)).to(device)
+            fake_imgs = generator(z, fake_labels)
+            outputs_fake = discriminator(fake_imgs, fake_labels)
+            predictions_fake = (outputs_fake < 0.5).float()
+            correct_fake += predictions_fake.sum().item()
+            total_fake += fake_imgs.size(0)
+
+    # Calculate accuracies
+    real_acc = correct_real / total_real * 100
+    fake_acc = correct_fake / total_fake * 100
+    overall_acc = (correct_real + correct_fake) / (total_real + total_fake) * 100
+
+    print(f"Real Accuracy: {real_acc:.2f}%")
+    print(f"Fake Accuracy: {fake_acc:.2f}%")
+    print(f"Overall Accuracy: {overall_acc:.2f}%")
+
+    # Prepare data for pie charts
+    correct_overall = correct_real + correct_fake
+    incorrect_overall = (total_real + total_fake) - correct_overall
+
+    correct_real_pct = correct_real
+    incorrect_real_pct = total_real - correct_real
+
+    correct_fake_pct = correct_fake
+    incorrect_fake_pct = total_fake - correct_fake
+
+    # Plot three pie charts in one figure
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+    # Overall Accuracy Pie Chart
+    axes[0].pie([correct_overall, incorrect_overall],
+                labels=["Correct", "Incorrect"], autopct="%1.1f%%", 
+                colors=["#4CAF50", "#F44336"], startangle=140)
+    axes[0].set_title("Overall Accuracy")
+
+    # Real Accuracy Pie Chart
+    axes[1].pie([correct_real_pct, incorrect_real_pct],
+                labels=["Correct", "Incorrect"], autopct="%1.1f%%",
+                colors=["#2196F3", "#FF9800"], startangle=140)
+    axes[1].set_title("Real Accuracy")
+
+    # Fake Accuracy Pie Chart
+    axes[2].pie([correct_fake_pct, incorrect_fake_pct],
+                labels=["Correct", "Incorrect"], autopct="%1.1f%%",
+                colors=["#9C27B0", "#E91E63"], startangle=140)
+    axes[2].set_title("Fake Accuracy")
+
+    # Save the figure
+    os.makedirs(save_dir, exist_ok=True)
+    pie_chart_path = os.path.join(save_dir, "discriminator_accuracies_over_testset.png")
+    plt.tight_layout()
+    plt.savefig(pie_chart_path, bbox_inches="tight")
+    plt.close()
+
+    print(f"Accuracy pie charts saved to '{pie_chart_path}'")
+
+
+
+import random
+import matplotlib.pyplot as plt
+import os
+import torch
+
+def random_interpolate_labels(generator, save_dir, num_rows=5, img_dim=100, device='cpu'):
+    """
+    Randomly interpolate between two labels for multiple rows of images.
+
+    Args:
+        generator (nn.Module): The trained Generator model.
+        save_dir (str): Directory to save the interpolation plot.
+        num_rows (int): Number of rows (interpolations) to generate.
+        img_dim (int): Dimensionality of the latent vector.
+        device (str): 'cpu' or 'cuda' for computation.
+    """
+    # Define a dictionary of labels for easy selection
+    label_dict = {
+        'T-shirt/top': 0, 'Trouser': 1, 'Pullover': 2, 'Dress': 3, 'Coat': 4,
+        'Sandal': 5, 'Shirt': 6, 'Sneaker': 7, 'Bag': 8, 'Ankle boot': 9
+    }
+    label_names = list(label_dict.keys())  # List of label names
+
+    os.makedirs(save_dir, exist_ok=True)
+    generator.eval()
+
+    fig, axs = plt.subplots(num_rows, 3, figsize=(10, 3 * num_rows))
+    
+    for i in range(num_rows):
+        # Randomly select two different labels
+        label1_name, label2_name = random.sample(label_names, 2)
+        label1 = label_dict[label1_name]
+        label2 = label_dict[label2_name]
+
+        # Fix a single random latent vector
+        z = torch.randn(1, img_dim).to(device)
+        label_tensor1 = torch.LongTensor([label1]).to(device)
+        label_tensor2 = torch.LongTensor([label2]).to(device)
+        
+        # Linearly interpolate between labels
+        label_interp = torch.tensor((label1 + label2) / 2).round().long().to(device)
+
+        # Generate images
+        with torch.no_grad():
+            img1 = generator(z, label_tensor1).cpu().squeeze()
+            img_interp = generator(z, label_interp.unsqueeze(0)).cpu().squeeze()
+            img2 = generator(z, label_tensor2).cpu().squeeze()
+
+        # Plot
+        axs[i, 0].imshow(img1, cmap='gray')
+        axs[i, 0].set_title(f"{label1_name}")
+        axs[i, 0].axis('off')
+
+        axs[i, 1].imshow(img_interp, cmap='gray')
+        axs[i, 1].set_title(f"Interpolated")
+        axs[i, 1].axis('off')
+
+        axs[i, 2].imshow(img2, cmap='gray')
+        axs[i, 2].set_title(f"{label2_name}")
+        axs[i, 2].axis('off')
+
+    # Save the plot
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "random_label_interpolation.png")
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
+
+    print(f"Random label interpolations saved to '{save_path}'")
+
+def load_and_transfer_generator_layers(pth_path, latent_analysis_generator_class, device='cpu'):
+    """
+    Load a Generator model trained with nn.DataParallel from a .pth file and
+    transfer the first two layers to a Generator_For_LatentSpaceAnalysis.
+
+    Args:
+        pth_path (str): Path to the .pth file containing the saved Generator model.
+        latent_analysis_generator_class (type): The class definition for Generator_For_LatentSpaceAnalysis.
+        device (str): Device to load the model ('cpu' or 'cuda').
+
+    Returns:
+        latent_analysis_generator (torch.nn.Module): Initialized Generator_For_LatentSpaceAnalysis
+                                                      with transferred layers.
+    """
+    # Load the saved state_dict
+    state_dict = torch.load(pth_path, map_location=device)
+
+    # Remove the 'module.' prefix if the model was trained with DataParallel
+    if any(key.startswith('module.') for key in state_dict.keys()):
+        state_dict = {key.replace('module.', ''): value for key, value in state_dict.items()}
+
+    # Initialize the Generator class and load the weights
+    generator = G().to(device)
+    generator.load_state_dict(state_dict)
+
+    # Initialize the Generator_For_LatentSpaceAnalysis
+    latent_analysis_generator = latent_analysis_generator_class()
+
+    # Transfer the embedding layer
+    latent_analysis_generator.label_emb.weight.data = generator.label_emb.weight.data.clone()
+
+    # Transfer the weights and biases of the first linear layer
+    latent_analysis_generator.fc1.weight.data = generator.model[0].weight.data.clone()
+    latent_analysis_generator.fc1.bias.data = generator.model[0].bias.data.clone()
+
+    print("Layers successfully transferred to the latent analysis generator.")
+    return latent_analysis_generator
+
 
 def load_models(model, model_path="./checkpoints/generator.pth", was_data_parallel=False):
     """Load the model weights."""
@@ -69,7 +268,6 @@ def outlier_detection(discriminator, test_loader, img_dim, save_dir):
     else:
         print("No outliers detected.")
 
-from sklearn.decomposition import PCA
 
 
 def latent_space_analysis(generator, train_loader, img_dim, save_dir):
@@ -90,7 +288,7 @@ def latent_space_analysis(generator, train_loader, img_dim, save_dir):
             break
         noise = torch.randn(1, img_dim)  # Random noise
         with torch.no_grad():
-            latent_rep = generator(noise, label, return_latent=True)  # Extract latent representations
+            latent_rep = generator(noise, label)  # Extract latent representations
             latent_vectors.append(latent_rep.squeeze().cpu().numpy())
             labels_list.append(label.item())
 
@@ -110,19 +308,19 @@ def latent_space_analysis(generator, train_loader, img_dim, save_dir):
 
     # General Visualization: All Classes Together
     plt.figure(figsize=(10, 10))
-    plt.title("Learned Latent Space Representations (Centered) with Class Names", fontsize=16)
+    plt.title("Learned Latent Space Representations  with Class Names", fontsize=16)
     scatter = plt.scatter(reduced_latent_vectors[:, 0], reduced_latent_vectors[:, 1],
                           c=labels_list, cmap=colormap, s=20, alpha=0.8)
     cbar = plt.colorbar(scatter)
     cbar.set_ticks(range(10))
     cbar.set_ticklabels(class_names)
     cbar.set_label("Class Names")
-    plt.xlabel("Principal Component 1 (Centered)")
-    plt.ylabel("Principal Component 2 (Centered)")
+    plt.xlabel("Principal Component 1 ")
+    plt.ylabel("Principal Component 2 ")
     plt.grid(True)
-    plt.savefig(f"{save_dir}/latent_space_with_class_names_centered.png", bbox_inches="tight")
+    plt.savefig(f"{save_dir}/latent_space_with_class_names.png", bbox_inches="tight")
     plt.close()
-    print(f"General latent space analysis saved to '{save_dir}/latent_space_with_class_names_centered.png'.")
+    print(f"General latent space analysis saved to '{save_dir}/latent_space_with_class_names.png'.")
 
     # Save Individual Class Plots with Consistent Colors
     class_folder = os.path.join(save_dir, "individual_classes")
@@ -138,10 +336,10 @@ def latent_space_analysis(generator, train_loader, img_dim, save_dir):
 
         # Plot for the current class with consistent colors
         plt.figure(figsize=(8, 8))
-        plt.title(f"Latent Space for Class: {class_name} (Centered)", fontsize=14)
+        plt.title(f"Latent Space for Class: {class_name} ", fontsize=14)
         plt.scatter(class_vectors[:, 0], class_vectors[:, 1], color=colormap(label_idx), s=20, alpha=0.8)
-        plt.xlabel("Principal Component 1 (Centered)")
-        plt.ylabel("Principal Component 2 (Centered)")
+        plt.xlabel("Principal Component 1 ")
+        plt.ylabel("Principal Component 2 ")
         plt.grid(True)
         plt.xlim(-5, 5)
         plt.ylim(-5, 5)
@@ -275,7 +473,7 @@ def main():
     train_loader = prepare_test_data_loader(training=True)
 
     model_path = f"./checkpoints/{args.ts}/generator_{args.ts}.pth"
-    save_dir = f"./samples/{args.ts}"
+    save_dir = f"./samples/best_training_samples"
     generator = G(latent_dim=args.latent_dim)
     generator = load_models(generator, model_path=model_path, was_data_parallel=args.data_parallel)
     discriminator = D()
@@ -292,10 +490,19 @@ def main():
     analyze_diversity(generator, img_dim=args.latent_dim, save_dir=save_dir)
     
     Latent_Analysis_G = G_LSA(latent_dim=args.latent_dim)
-    Latent_Analysis_G = load_models(Latent_Analysis_G, model_path=model_path, was_data_parallel=args.data_parallel)
+    Latent_Analysis_G = load_and_transfer_generator_layers(model_path, G_LSA, device=torch.device('cpu'))
 
     # Perform latent space analysis with the training set
     latent_space_analysis(Latent_Analysis_G, train_loader, img_dim=args.latent_dim, save_dir=save_dir)
+
+    # Perform latent interpolation
+    print("Latent Space Interpolation:")
+    random_interpolate_labels(generator, save_dir=save_dir, num_rows=6, img_dim=100, device='cpu')
+
+    # Evaluate Discriminator performance
+    print("Evaluating Discriminator Performance:")
+    test_discriminator(discriminator, generator, test_loader, img_dim=args.latent_dim, save_dir=save_dir)
+
 
 
 if __name__ == "__main__":
