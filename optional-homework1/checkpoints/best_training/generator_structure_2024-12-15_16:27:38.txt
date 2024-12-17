@@ -1,0 +1,15 @@
+DataParallel(
+  (module): Generator(
+    (label_emb): Embedding(10, 10)
+    (model): Sequential(
+      (0): Linear(in_features=110, out_features=256, bias=True)
+      (1): LeakyReLU(negative_slope=0.2, inplace=True)
+      (2): Linear(in_features=256, out_features=512, bias=True)
+      (3): LeakyReLU(negative_slope=0.2, inplace=True)
+      (4): Linear(in_features=512, out_features=1024, bias=True)
+      (5): LeakyReLU(negative_slope=0.2, inplace=True)
+      (6): Linear(in_features=1024, out_features=784, bias=True)
+      (7): Tanh()
+    )
+  )
+)
