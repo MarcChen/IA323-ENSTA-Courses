@@ -56,26 +56,30 @@ class Discriminator(nn.Module):
     
 
 class Generator_For_LatentSpaceAnalysis(nn.Module):
-    def __init__(self, latent_dim=100, class_label_size=10, Image_size=784):
+    def __init__(self, latent_dim=100, class_label_size=10):
         super().__init__()
 
         self.latent_dim = latent_dim
         self.label_emb = nn.Embedding(class_label_size, class_label_size)
 
-        self.fc1 = nn.Linear(self.latent_dim + class_label_size, 256)  # First layer
+        # First layer
+        self.fc1 = nn.Linear(self.latent_dim + class_label_size, 256)
         self.leaky_relu1 = nn.LeakyReLU(0.2, inplace=True)
+
+    def forward(self, z, labels, output_before_relu=False):
+        z = z.view(z.size(0), self.latent_dim)
+        c = self.label_emb(labels)
+        x = torch.cat([z, c], 1)
+
+        # Raw output of fc1
+        latent_raw = self.fc1(x)
+
+        if output_before_relu:
+            return latent_raw  # Return before activation
         
+        # Activated output
+        latent_activated = self.leaky_relu1(latent_raw)
+        return latent_activated  # Return after activation
 
-    def forward(self, z, labels):
-        z = z.view(z.size(0), self.latent_dim)  # Reshape noise
-        c = self.label_emb(labels)  # Label embedding
-        x = torch.cat([z, c], 1)  # Concatenate noise and labels
-
-        # Compute latent representation after first layer
-        latent_rep = self.fc1(x)
-        latent_rep = self.leaky_relu1(latent_rep)
-
-        
-        return latent_rep  # Return latent representation
         
     

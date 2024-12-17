@@ -318,9 +318,9 @@ def latent_space_analysis(generator, train_loader, img_dim, save_dir):
     plt.xlabel("Principal Component 1 ")
     plt.ylabel("Principal Component 2 ")
     plt.grid(True)
-    plt.savefig(f"{save_dir}/latent_space_with_class_names.png", bbox_inches="tight")
+    plt.savefig(f"{save_dir}/latent_space_after_Relu.png", bbox_inches="tight")
     plt.close()
-    print(f"General latent space analysis saved to '{save_dir}/latent_space_with_class_names.png'.")
+    print(f"General latent space analysis saved to '{save_dir}/latent_space_after_Relu.png'.")
 
     # Save Individual Class Plots with Consistent Colors
     class_folder = os.path.join(save_dir, "individual_classes")
@@ -351,6 +351,63 @@ def latent_space_analysis(generator, train_loader, img_dim, save_dir):
 
 
 
+def latent_space_analysis_before_LeakyReLU(generator, train_loader, save_dir, img_dim):
+    """
+    Analyze learned latent space representations before or after LeakyReLU activation.
+    
+    Args:
+        generator (nn.Module): Generator model for latent space analysis.
+        train_loader (DataLoader): DataLoader for real samples.
+        save_dir (str): Directory to save PCA plots.
+        img_dim (int): Dimension of the latent vector.
+    """
+    output_before_relu = True
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Class names
+    class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+                   'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+
+    latent_vectors = []
+    labels_list = []
+
+    # Extract latent representations
+    for idx, (real_imgs, labels) in enumerate(train_loader):
+        if idx >= 1000:  # Limit to 1000 samples
+            break
+        noise = torch.randn(1, img_dim)
+        with torch.no_grad():
+            latent_rep = generator(noise, labels, output_before_relu=output_before_relu)
+            latent_vectors.append(latent_rep.squeeze().cpu().numpy())
+            labels_list.append(labels.item())
+
+    # Convert to numpy
+    latent_vectors = np.array(latent_vectors)
+    labels_list = np.array(labels_list)
+
+    # Apply PCA
+    pca = PCA(n_components=2)
+    reduced_vectors = pca.fit_transform(latent_vectors)
+
+    # Visualization
+    plt.figure(figsize=(10, 10))
+    title = "Latent Space (Before LeakyReLU)" if output_before_relu else "Latent Space (After LeakyReLU)"
+    plt.title(title, fontsize=16)
+    scatter = plt.scatter(reduced_vectors[:, 0], reduced_vectors[:, 1], c=labels_list, cmap="tab10", alpha=0.8)
+    cbar = plt.colorbar(scatter, ticks=range(10))
+    cbar.set_ticklabels(class_names)
+    cbar.set_label("Class Names")
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.grid(True)
+
+    # Save the plot
+    suffix = "before_relu" if output_before_relu else "after_relu"
+    save_path = os.path.join(save_dir, f"latent_space_{suffix}.png")
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
+
+    print(f"Latent space analysis saved to '{save_path}'")
 
 
 
@@ -494,6 +551,7 @@ def main():
 
     # Perform latent space analysis with the training set
     latent_space_analysis(Latent_Analysis_G, train_loader, img_dim=args.latent_dim, save_dir=save_dir)
+    latent_space_analysis_before_LeakyReLU(generator=Latent_Analysis_G, train_loader=train_loader, save_dir=save_dir, img_dim=args.latent_dim)
 
     # Perform latent interpolation
     print("Latent Space Interpolation:")
