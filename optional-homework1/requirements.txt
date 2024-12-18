@@ -1,5 +1,6 @@
-torchvision
 torch
-numpy
-tqdm
+torchvision
 matplotlib
+numpy
+scikit-learn
+tqdm
